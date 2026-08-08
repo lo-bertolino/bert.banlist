@@ -282,5 +282,268 @@ namespace Bert.Banlist.Tests
                 Ban.WithReplacement("Legacy.Data.Client", "New.Data").WithLocation(0));
             await test.RunAsync();
         }
+
+        [Fact]
+        public async Task InstanceMethodSwap_ReceiverPreserved_ImplementsReplacementInterface()
+        {
+            var test = Create("""
+                using Legacy.Stuff;
+
+                class C
+                {
+                    void M()
+                    {
+                        var widget = new InstanceWidget();
+                        widget.{|#0:OldInstanceMethod|}("a");
+                    }
+                }
+                """, """
+                using Legacy.Stuff;
+
+                class C
+                {
+                    void M()
+                    {
+                        var widget = new InstanceWidget();
+                        widget.NewInstanceMethod("a");
+                    }
+                }
+                """, """
+                <BannedSymbols>
+                  <Ban kind="Method" symbol="Legacy.Stuff.InstanceWidget.OldInstanceMethod(System.String)" replacement="New.Stuff.IInstanceWidget.NewInstanceMethod" />
+                </BannedSymbols>
+                """);
+            test.ExpectedDiagnostics.Add(
+                Ban.WithReplacement("Legacy.Stuff.InstanceWidget.OldInstanceMethod(string)", "New.Stuff.IInstanceWidget.NewInstanceMethod").WithLocation(0));
+            await test.RunAsync();
+        }
+
+        [Fact]
+        public async Task InstancePropertySwap_ReceiverPreserved_ImplementsReplacementInterface()
+        {
+            var test = Create("""
+                using Legacy.Stuff;
+
+                class C
+                {
+                    string M()
+                    {
+                        var widget = new InstanceWidget();
+                        return widget.{|#0:OldInstanceValue|};
+                    }
+                }
+                """, """
+                using Legacy.Stuff;
+
+                class C
+                {
+                    string M()
+                    {
+                        var widget = new InstanceWidget();
+                        return widget.NewInstanceValue;
+                    }
+                }
+                """, """
+                <BannedSymbols>
+                  <Ban kind="Property" symbol="Legacy.Stuff.InstanceWidget.OldInstanceValue" replacement="New.Stuff.IInstanceWidget.NewInstanceValue" />
+                </BannedSymbols>
+                """);
+            test.ExpectedDiagnostics.Add(
+                Ban.WithReplacement("Legacy.Stuff.InstanceWidget.OldInstanceValue", "New.Stuff.IInstanceWidget.NewInstanceValue").WithLocation(0));
+            await test.RunAsync();
+        }
+
+        [Fact]
+        public async Task InstanceMethodSwap_ReceiverDerivesFromReplacementContainingType()
+        {
+            var test = Create("""
+                using Legacy.Stuff;
+
+                class C
+                {
+                    void M()
+                    {
+                        var widget = new InstanceWidgetDerived();
+                        widget.{|#0:OldInstanceMethod2|}("a");
+                    }
+                }
+                """, """
+                using Legacy.Stuff;
+
+                class C
+                {
+                    void M()
+                    {
+                        var widget = new InstanceWidgetDerived();
+                        widget.NewInstanceMethod2("a");
+                    }
+                }
+                """, """
+                <BannedSymbols>
+                  <Ban kind="Method" symbol="Legacy.Stuff.InstanceWidgetDerived.OldInstanceMethod2(System.String)" replacement="New.Stuff.InstanceWidgetBase.NewInstanceMethod2" />
+                </BannedSymbols>
+                """);
+            test.ExpectedDiagnostics.Add(
+                Ban.WithReplacement("Legacy.Stuff.InstanceWidgetDerived.OldInstanceMethod2(string)", "New.Stuff.InstanceWidgetBase.NewInstanceMethod2").WithLocation(0));
+            await test.RunAsync();
+        }
+
+        [Fact]
+        public async Task InstanceMethodBan_StaticOnlyReplacement_NoFixOffered()
+        {
+            var source = """
+                using Legacy.Stuff;
+
+                class C
+                {
+                    void M()
+                    {
+                        var widget = new InstanceWidget();
+                        widget.{|#0:OldInstanceMethod|}("a");
+                    }
+                }
+                """;
+            var test = Create(source, source, """
+                <BannedSymbols>
+                  <Ban kind="Method" symbol="Legacy.Stuff.InstanceWidget.OldInstanceMethod(System.String)" replacement="New.Stuff.NewHelper.DoThing" />
+                </BannedSymbols>
+                """);
+            var diagnostic = Ban.WithReplacement("Legacy.Stuff.InstanceWidget.OldInstanceMethod(string)", "New.Stuff.NewHelper.DoThing").WithLocation(0);
+            test.ExpectedDiagnostics.Add(diagnostic);
+            test.FixedState.ExpectedDiagnostics.Add(diagnostic);
+            await test.RunAsync();
+        }
+
+        [Fact]
+        public async Task ArgumentMap_ReorderOnStaticMethodCall()
+        {
+            var test = Create("""
+                using Legacy.Stuff;
+
+                class C
+                {
+                    void M()
+                    {
+                        OldHelper.{|#0:Combine|}("a", "b");
+                    }
+                }
+                """, """
+                using New.Stuff;
+
+                class C
+                {
+                    void M()
+                    {
+                        NewHelper.Combine("b", "a");
+                    }
+                }
+                """, """
+                <BannedSymbols>
+                  <Ban kind="Method" symbol="Legacy.Stuff.OldHelper.Combine(System.String,System.String)" replacement="New.Stuff.NewHelper.Combine" argumentMap="1,0" />
+                </BannedSymbols>
+                """);
+            test.ExpectedDiagnostics.Add(
+                Ban.WithReplacement("Legacy.Stuff.OldHelper.Combine(string, string)", "New.Stuff.NewHelper.Combine").WithLocation(0));
+            await test.RunAsync();
+        }
+
+        [Fact]
+        public async Task ArgumentMap_DropsArgument()
+        {
+            var test = Create("""
+                using Legacy.Stuff;
+
+                class C
+                {
+                    void M()
+                    {
+                        OldHelper.{|#0:TrimTo|}("hello", 3);
+                    }
+                }
+                """, """
+                using New.Stuff;
+
+                class C
+                {
+                    void M()
+                    {
+                        NewHelper.TrimTo("hello");
+                    }
+                }
+                """, """
+                <BannedSymbols>
+                  <Ban kind="Method" symbol="Legacy.Stuff.OldHelper.TrimTo(System.String,System.Int32)" replacement="New.Stuff.NewHelper.TrimTo" argumentMap="0" />
+                </BannedSymbols>
+                """);
+            test.ExpectedDiagnostics.Add(
+                Ban.WithReplacement("Legacy.Stuff.OldHelper.TrimTo(string, int)", "New.Stuff.NewHelper.TrimTo").WithLocation(0));
+            await test.RunAsync();
+        }
+
+        [Fact]
+        public async Task ArgumentMap_InvalidContent_IgnoredFallsBackToCountBasedBehavior()
+        {
+            var test = Create("""
+                using Legacy.Stuff;
+
+                class C
+                {
+                    void M()
+                    {
+                        OldHelper.{|#0:DoThing|}("a");
+                    }
+                }
+                """, """
+                using New.Stuff;
+
+                class C
+                {
+                    void M()
+                    {
+                        NewHelper.DoThing("a");
+                    }
+                }
+                """, """
+                <BannedSymbols>
+                  <Ban kind="Method" symbol="Legacy.Stuff.OldHelper.DoThing(System.String)" replacement="New.Stuff.NewHelper.DoThing" argumentMap="not-a-number" />
+                </BannedSymbols>
+                """);
+            test.ExpectedDiagnostics.Add(
+                Ban.WithReplacement("Legacy.Stuff.OldHelper.DoThing(string)", "New.Stuff.NewHelper.DoThing").WithLocation(0));
+            await test.RunAsync();
+        }
+
+        [Fact]
+        public async Task ArgumentMap_OnConstructorSwap()
+        {
+            var test = Create("""
+                using Legacy.Stuff;
+
+                class C
+                {
+                    void M()
+                    {
+                        var x = {|#0:new OldHelper(5, "a")|};
+                    }
+                }
+                """, """
+                using New.Stuff;
+
+                class C
+                {
+                    void M()
+                    {
+                        var x = new NewHelper("a", 5);
+                    }
+                }
+                """, """
+                <BannedSymbols>
+                  <Ban kind="Method" symbol="Legacy.Stuff.OldHelper.#ctor(System.Int32,System.String)" replacement="New.Stuff.NewHelper" argumentMap="1,0" />
+                </BannedSymbols>
+                """);
+            test.ExpectedDiagnostics.Add(
+                Ban.WithReplacement("Legacy.Stuff.OldHelper.OldHelper(int, string)", "New.Stuff.NewHelper").WithLocation(0));
+            await test.RunAsync();
+        }
     }
 }

@@ -53,7 +53,8 @@ namespace Bert.Banlist
 
                 var replacement = NullIfEmpty((string?)element.Attribute("replacement"));
                 var reason = NullIfEmpty((string?)element.Attribute("reason"));
-                builder.Add(new BanEntry(kind, symbol!.Trim(), replacement, reason));
+                var argumentMap = ParseArgumentMap((string?)element.Attribute("argumentMap"));
+                builder.Add(new BanEntry(kind, symbol!.Trim(), replacement, reason, argumentMap));
             }
 
             return builder.ToImmutable();
@@ -63,6 +64,34 @@ namespace Bert.Banlist
         {
             value = value?.Trim();
             return string.IsNullOrEmpty(value) ? null : value;
+        }
+
+        /// <summary>
+        /// Parses a comma-separated list of non-negative zero-based indices. Any malformed value
+        /// (non-numeric, negative, empty entry) makes the whole attribute void rather than fail the
+        /// build — same leniency philosophy as the rest of this parser.
+        /// </summary>
+        private static int[]? ParseArgumentMap(string? value)
+        {
+            value = value?.Trim();
+            if (string.IsNullOrEmpty(value))
+            {
+                return null;
+            }
+
+            var parts = value!.Split(',');
+            var indices = new int[parts.Length];
+            for (var i = 0; i < parts.Length; i++)
+            {
+                if (!int.TryParse(parts[i].Trim(), out var index) || index < 0)
+                {
+                    return null;
+                }
+
+                indices[i] = index;
+            }
+
+            return indices;
         }
     }
 }

@@ -20,6 +20,7 @@ namespace Bert.Banlist
         public const string BannedSymbolProperty = "BannedSymbol";
         public const string ReplacementProperty = "Replacement";
         public const string ReasonProperty = "Reason";
+        public const string ArgumentMapProperty = "ArgumentMap";
 
         private const string Title = "Symbol is banned by style guide";
         private const string Category = "Style";
@@ -135,23 +136,51 @@ namespace Bert.Banlist
                 return;
             }
 
-            var containingNamespace = symbol is IMethodSymbol { MethodKind: MethodKind.Constructor } c
-                ? c.ContainingType.ContainingNamespace
-                : symbol.ContainingNamespace;
+            var containingNamespace = GetDeclaringNamespace(symbol);
             if (containingNamespace == null || containingNamespace.IsGlobalNamespace)
             {
                 return;
             }
 
+            if (TryMatchNamespace(containingNamespace, data, out var entry))
+            {
+                Report(context, node.GetLocation(), symbol, entry!);
+            }
+        }
+
+        /// <summary>
+        /// The namespace a symbol is <em>declared in</em>, for symbol kinds where referencing the
+        /// symbol counts as using that namespace: types and their members. Returns null for
+        /// everything else.
+        /// <para>
+        /// Locals, parameters, type parameters, labels and range variables inherit
+        /// <see cref="ISymbol.ContainingNamespace"/> from the enclosing declaration, so treating them
+        /// as usages would flag every local of every file that merely <em>lives inside</em> a banned
+        /// namespace — which is exactly the code a team is trying to migrate away, not code that
+        /// consumes it.
+        /// </para>
+        /// </summary>
+        private static INamespaceSymbol? GetDeclaringNamespace(ISymbol symbol) => symbol switch
+        {
+            INamedTypeSymbol type => type.ContainingNamespace,
+            IMethodSymbol or IPropertySymbol or IFieldSymbol or IEventSymbol => symbol.ContainingType?.ContainingNamespace,
+            _ => null,
+        };
+
+        private static bool TryMatchNamespace(INamespaceSymbol containingNamespace, BanData data, out BanEntry? entry)
+        {
             var namespaceName = containingNamespace.ToDisplayString();
-            foreach (var (banned, entry) in data.Namespaces)
+            foreach (var (banned, candidate) in data.Namespaces)
             {
                 if (namespaceName == banned || namespaceName.StartsWith(banned + ".", StringComparison.Ordinal))
                 {
-                    Report(context, node.GetLocation(), symbol, entry);
-                    return;
+                    entry = candidate;
+                    return true;
                 }
             }
+
+            entry = null;
+            return false;
         }
 
         private static void AnalyzeObjectCreation(SyntaxNodeAnalysisContext context, BanData data)
@@ -179,17 +208,11 @@ namespace Bert.Banlist
                     return;
                 }
 
-                if (!data.Namespaces.IsEmpty && type.ContainingNamespace is { IsGlobalNamespace: false } ns)
+                if (!data.Namespaces.IsEmpty
+                    && type.ContainingNamespace is { IsGlobalNamespace: false } ns
+                    && TryMatchNamespace(ns, data, out var nsEntry))
                 {
-                    var namespaceName = ns.ToDisplayString();
-                    foreach (var (banned, nsEntry) in data.Namespaces)
-                    {
-                        if (namespaceName == banned || namespaceName.StartsWith(banned + ".", StringComparison.Ordinal))
-                        {
-                            Report(context, context.Node.GetLocation(), type, nsEntry);
-                            return;
-                        }
-                    }
+                    Report(context, context.Node.GetLocation(), type, nsEntry!);
                 }
             }
         }
@@ -207,6 +230,11 @@ namespace Bert.Banlist
             if (entry.Reason != null)
             {
                 properties.Add(ReasonProperty, entry.Reason);
+            }
+
+            if (entry.ArgumentMap != null)
+            {
+                properties.Add(ArgumentMapProperty, string.Join(",", entry.ArgumentMap));
             }
 
             var display = symbol.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
