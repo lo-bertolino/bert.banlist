@@ -1,0 +1,4 @@
+{
+  "BanSymbolCommand.DisplayName": "Ban symbol under caret...",
+  "BanSymbolCommand.TooltipText": "Add the symbol under the caret to this project's BannedSymbols.xml"
+}

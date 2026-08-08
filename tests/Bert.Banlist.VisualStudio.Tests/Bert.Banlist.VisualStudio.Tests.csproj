@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>Bert.Banlist.VisualStudio.Tests</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Bert.Banlist.Analyzers\Bert.Banlist.Analyzers.csproj" />
+  </ItemGroup>
+
+  <!-- Linked source rather than a project reference to Bert.Banlist.VisualStudio: these three files
+       are deliberately free of every VisualStudio.Extensibility type, so the tests run without
+       dragging the VS SDK (and its VSIX build step) into the test host. -->
+  <ItemGroup>
+    <Compile Include="..\..\src\Bert.Banlist.VisualStudio\BanXmlWriter.cs" Link="Linked\BanXmlWriter.cs" />
+    <Compile Include="..\..\src\Bert.Banlist.VisualStudio\SymbolTextResolver.cs" Link="Linked\SymbolTextResolver.cs" />
+    <Compile Include="..\..\src\Bert.Banlist.VisualStudio\ProjectLocator.cs" Link="Linked\ProjectLocator.cs" />
+  </ItemGroup>
+
+</Project>

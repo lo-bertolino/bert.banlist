@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- VisualStudio.Extensibility out-of-process extensions run on the .NET 8 runtime that
+         Visual Studio 2022 17.14+ / Visual Studio 2026 host for extensions. -->
+    <TargetFramework>net8.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>Bert.Banlist.VisualStudio</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.VisualStudio.Extensibility.Sdk" Version="17.14.40608" />
+    <PackageReference Include="Microsoft.VisualStudio.Extensibility.Build" Version="17.14.40608" />
+  </ItemGroup>
+
+  <!-- Shared with the analyzer by source, not by assembly reference: the ban-list schema types are
+       pure (System.Xml.Linq only) and linking them keeps Microsoft.CodeAnalysis out of the VSIX
+       while guaranteeing the kind names written here are exactly the ones the analyzer parses. -->
+  <ItemGroup>
+    <Compile Include="..\Bert.Banlist.Analyzers\BanKind.cs" Link="Shared\BanKind.cs" />
+    <Compile Include="..\Bert.Banlist.Analyzers\BanEntry.cs" Link="Shared\BanEntry.cs" />
+    <Compile Include="..\Bert.Banlist.Analyzers\BanList.cs" Link="Shared\BanList.cs" />
+  </ItemGroup>
+
+</Project>

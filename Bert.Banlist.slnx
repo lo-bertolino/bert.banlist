@@ -6,8 +6,10 @@
     <Project Path="src/Bert.Banlist.Analyzers/Bert.Banlist.Analyzers.csproj" />
     <Project Path="src/Bert.Banlist.CodeFixes/Bert.Banlist.CodeFixes.csproj" />
     <Project Path="src/Bert.Banlist.Package/Bert.Banlist.Package.csproj" />
+    <Project Path="src/Bert.Banlist.VisualStudio/Bert.Banlist.VisualStudio.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Bert.Banlist.Tests/Bert.Banlist.Tests.csproj" />
+    <Project Path="tests/Bert.Banlist.VisualStudio.Tests/Bert.Banlist.VisualStudio.Tests.csproj" />
   </Folder>
 </Solution>
