@@ -1,0 +1,12 @@
+<BannedSymbols>
+  <!-- Style rule: commands must be async. -->
+  <Ban kind="Type"
+       symbol="Sample.App.Commands.RelayCommand"
+       replacement="Sample.App.Commands.AsyncRelayCommand"
+       reason="Commands must be async — see style guide §4." />
+
+  <!-- Plain ban without replacement: diagnostic only. -->
+  <Ban kind="Property"
+       symbol="System.DateTime.Now"
+       reason="Use TimeProvider — DateTime.Now is untestable." />
+</BannedSymbols>

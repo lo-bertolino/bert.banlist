@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/sample/">
+    <Project Path="sample/Sample.App/Sample.App.csproj" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/Bert.Banlist.Analyzers/Bert.Banlist.Analyzers.csproj" />
+    <Project Path="src/Bert.Banlist.CodeFixes/Bert.Banlist.CodeFixes.csproj" />
+    <Project Path="src/Bert.Banlist.Package/Bert.Banlist.Package.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Bert.Banlist.Tests/Bert.Banlist.Tests.csproj" />
+  </Folder>
+</Solution>

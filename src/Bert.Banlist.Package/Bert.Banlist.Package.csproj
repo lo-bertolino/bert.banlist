@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
+
+    <PackageId>Bert.Banlist</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>Lorenzo Bertolino</Authors>
+    <Description>Config-driven banned-API analyzer for C#. Ban types, members, and namespaces via BannedSymbols.xml, get a suggested replacement in the diagnostic, a Ctrl+. code fix with FixAll support, and a refactoring to add any symbol to the ban list from the editor.</Description>
+    <PackageTags>roslyn;analyzer;banned-api;style-guide;codefix</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <DevelopmentDependency>true</DevelopmentDependency>
+    <NoPackageAnalysis>true</NoPackageAnalysis>
+    <NoWarn>$(NoWarn);NU5128</NoWarn>
+    <TargetsForTfmSpecificContentInPackage>$(TargetsForTfmSpecificContentInPackage);_AddAnalyzersToOutput</TargetsForTfmSpecificContentInPackage>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Bert.Banlist.Analyzers\Bert.Banlist.Analyzers.csproj" PrivateAssets="all" />
+    <ProjectReference Include="..\Bert.Banlist.CodeFixes\Bert.Banlist.CodeFixes.csproj" PrivateAssets="all" />
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <Target Name="_AddAnalyzersToOutput">
+    <ItemGroup>
+      <TfmSpecificPackageFile Include="$(OutputPath)\Bert.Banlist.Analyzers.dll" PackagePath="analyzers/dotnet/cs" />
+      <TfmSpecificPackageFile Include="$(OutputPath)\Bert.Banlist.CodeFixes.dll" PackagePath="analyzers/dotnet/cs" />
+    </ItemGroup>
+  </Target>
+
+</Project>
