@@ -30,59 +30,63 @@ The ban list is **per project**: each project's `BannedSymbols.xml` is independe
 
 ```xml
 <BannedSymbols>
-  <!-- Type ban: sync commands are forbidden, use the async variant. -->
-  <Ban kind="Type"
-       symbol="CommunityToolkit.Mvvm.Input.RelayCommand"
+  <!-- Type ban: sync commands are forbidden, use the async variant. The argument itself needs
+       reshaping too — see "Reshaping arguments with <Param>" below. -->
+  <Ban symbol="CommunityToolkit.Mvvm.Input.RelayCommand"
        replacement="CommunityToolkit.Mvvm.Input.AsyncRelayCommand"
-       reason="Commands must be async — see style guide §4." />
+       reason="Commands must be async — see style guide §4.">
+    <Param source="0" template="async {0}" />
+  </Ban>
 
   <!-- Method ban, one specific overload (doc-id parameter list). -->
-  <Ban kind="Method"
-       symbol="System.Console.WriteLine(System.String)"
+  <Ban symbol="System.Console.WriteLine(System.String)"
        replacement="MyProject.Logging.Log.Info"
        reason="Use structured logging." />
 
   <!-- Method ban, all overloads (no parameter list). -->
-  <Ban kind="Method" symbol="System.Console.WriteLine" replacement="MyProject.Logging.Log.Info" />
+  <Ban symbol="System.Console.WriteLine" replacement="MyProject.Logging.Log.Info" />
 
   <!-- Method ban with argumentMap: the replacement takes the same two arguments in the opposite
        order. "1,0" means "new arg 0 = old arg 1, new arg 1 = old arg 0". -->
-  <Ban kind="Method"
-       symbol="Legacy.Utils.Pair(System.String,System.String)"
+  <Ban symbol="Legacy.Utils.Pair(System.String,System.String)"
        replacement="MyProject.Utils.Pair"
        argumentMap="1,0" />
 
   <!-- Instance member ban: replacement lives on a base type / interface the receiver already
        implements, so the receiver expression is kept and only the member name changes. -->
-  <Ban kind="Method"
-       symbol="Legacy.Widgets.OldWidget.Render(System.String)"
+  <Ban symbol="Legacy.Widgets.OldWidget.Render(System.String)"
        replacement="MyProject.Widgets.IWidget.RenderAsync"
        reason="Rendering must be async." />
 
   <!-- Constructor ban via the #ctor member name. -->
-  <Ban kind="Method" symbol="System.Net.WebClient.#ctor" reason="WebClient is legacy; use HttpClient." />
+  <Ban symbol="System.Net.WebClient.#ctor" reason="WebClient is legacy; use HttpClient." />
 
   <!-- Namespace ban: everything in the namespace (and sub-namespaces). The fix maps each type
        to the same-named type under the replacement namespace when it exists. -->
-  <Ban kind="Namespace"
-       symbol="System.Data.SqlClient"
+  <Ban symbol="System.Data.SqlClient"
        replacement="Microsoft.Data.SqlClient"
        reason="See migration ADR-007." />
 
   <!-- Plain ban: no replacement, diagnostic only. -->
-  <Ban kind="Property" symbol="System.DateTime.Now" reason="Use IClock — DateTime.Now is untestable." />
+  <Ban symbol="System.DateTime.Now" reason="Use IClock — DateTime.Now is untestable." />
 </BannedSymbols>
 ```
 
 ### Schema
 
+There is no `kind` attribute — what `symbol` resolves to in *your* compilation decides how it's treated, so the ban list can't drift out of sync with what it's banning:
+
+- A parenthesized signature or a trailing `#ctor` can only be a method or constructor — checked first.
+- Otherwise the whole text is tried as a **type**.
+- If that fails, the text up to the last dot is tried as a **container type**, and the remainder as a member on it — whichever kind that member turns out to be (method, property, field, event) decides the classification.
+- If nothing resolves, the entry becomes a **namespace**-prefix ban instead, matched by string against usages later — the same fallback a typo in a type name gets, so an entry that's genuinely meant as a namespace needs no special marker.
+
 | Attribute | Required | Meaning |
 |---|---|---|
-| `kind` | yes | `Type`, `Method`, `Property`, `Field`, `Event`, or `Namespace` |
 | `symbol` | yes | Full name of the banned symbol (see formats below) |
 | `replacement` | no | Full name of the suggested replacement. Present → shown in the message and the code fix is offered. Absent → plain ban, diagnostic only. |
 | `reason` | no | Free text appended to the diagnostic message |
-| `argumentMap` | no | `Method`-kind entries only. Comma-separated zero-based indices into the *original* argument list, defining the *new* argument order/selection — see below. |
+| `argumentMap` | no | Comma-separated zero-based indices into the *original* argument list, defining the *new* argument order/selection — see below. Superseded by `<Param>` children when both are present. |
 
 Symbol name formats:
 
@@ -91,7 +95,7 @@ Symbol name formats:
 - **Property / Field / Event**: `Some.Namespace.Type.MemberName`.
 - **Namespace**: `Some.Namespace` — bans usage of everything within it, including sub-namespaces. "Usage" means referencing a type or a type's member: code that merely *lives inside* the banned namespace is not flagged for its own locals, parameters or type parameters, so you can ban a legacy namespace while its source still compiles in the same solution.
 
-Entries that don't resolve against the current compilation (assembly not referenced, typo) are skipped silently — a shared ban list never breaks projects that don't reference the banned assembly. Malformed XML disables the analyzer for that project rather than erroring the build.
+Entries that don't resolve as a type or member against the current compilation fall back to a namespace-prefix ban (see above) rather than being dropped — a shared ban list still never *breaks* a project that doesn't reference the banned assembly, it just can't accidentally go silent either. Malformed XML disables the analyzer for that project rather than erroring the build.
 
 ## Severity
 
@@ -115,14 +119,20 @@ The fix is deliberately conservative — a standing warning beats silently broke
 - Extension-method calls (`recv.Ext(args)`) are not rewritten in v1 — the diagnostic still fires, but no fix is offered (see Known limitations).
 - Namespace bans: fixed per type reference by mapping to the same-named type under the replacement namespace, when that type exists.
 
-Note the compatibility check is arity-only: `RelayCommand(Action)` → `AsyncRelayCommand(Func<Task>)` both take one argument, so the fix is offered and the argument keeps its old type — you fix the resulting compile error (usually `() => ...` → `async () => ...`). That's intentional: it drags the call site to the new API instead of leaving it on the banned one.
+Without an argument plan the compatibility check is arity-only: if a plain type/method swap and its
+replacement both take the same number of arguments, the fix is offered and each argument keeps its
+original text untouched — including its type. `RelayCommand(Action)` → `AsyncRelayCommand(Func<Task>)`
+both take one argument, so unadorned this produces `AsyncRelayCommand(() => ...)`, which doesn't
+compile against `Func<Task>`. That's what `<Param template="...">` (below) is for: reshaping the
+argument's text, not just its position, so the fix actually produces `async () => ...`.
 
 ### `argumentMap`
 
-For `Method`-kind entries (including constructors), `argumentMap` reorders or drops arguments when the
-replacement's parameter list doesn't line up 1:1 with the banned one. It's a comma-separated list of
-zero-based indices into the *original* call's argument list; the *position* in the list is the new
-argument's position, and the *value* is which original argument goes there:
+For entries whose fix rewrites an argument list (methods, constructors, and type bans on `new T(...)`),
+`argumentMap` reorders or drops arguments when the replacement's parameter list doesn't line up 1:1
+with the banned one. It's a comma-separated list of zero-based indices into the *original* call's
+argument list; the *position* in the list is the new argument's position, and the *value* is which
+original argument goes there:
 
 - `argumentMap="1,0"` swaps two arguments: `Old(a, b)` → `New(b, a)`.
 - `argumentMap="0"` keeps only the first argument, dropping the rest: `Old(a, b)` → `New(a)`.
@@ -134,6 +144,34 @@ modifier, the expression itself — is carried over unchanged; only its position
 
 A malformed `argumentMap` (non-numeric, negative, or otherwise unparsable) is treated as if the
 attribute were absent — the fix falls back to plain count-based compatibility instead of failing.
+
+### Reshaping arguments with `<Param>`
+
+`argumentMap` only *selects and reorders* — it can't change what an argument's text says. `<Param>`
+child elements can, by running the original argument's text through a template before it's placed in
+the new call:
+
+```xml
+<Ban symbol="Legacy.Stuff.OldTimer" replacement="New.Stuff.NewTimer">
+  <Param source="0" template="System.TimeSpan.FromMilliseconds({0})" />
+</Ban>
+```
+
+Each `<Param>` becomes one argument of the new call, in document order:
+
+- `source` (required): zero-based index into the *original* call's argument list — same numbering as `argumentMap`.
+- `template` (optional): `{0}` is replaced with that argument's own expression text (trivia stripped); everything else in the template is copied literally. Omit it for a plain copy — a `<Param source="N" />` with no template is exactly one `argumentMap` slot, so the two mechanisms compose the same way; a `<Ban>` with both present uses `<Param>` and ignores `argumentMap`.
+
+Two shapes cover most real migrations:
+
+- **Reshape a value**: `template="System.TimeSpan.FromMilliseconds({0})"` turns an `int` argument into a `TimeSpan` one for a retyped parameter.
+- **Change a delegate's signature**: `template="async {0}"` turns a lambda passed as `Action` into one that satisfies `Func<Task>` — the motivating case for this whole mechanism (`RelayCommand(Action)` → `AsyncRelayCommand(Func<Task>)`, shown at the top of this file). The result usually still needs an `await` added by hand — the compiler flags that with `CS1998`, not silently.
+
+The fix only checks that the substituted text **parses** as a complete expression (`async {0}` applied
+to a lambda parses; applied to a bare method-group reference like `Save` it becomes `async Save`, which
+doesn't, and the fix is skipped) — it does not check that the result **type-checks** against the
+replacement's parameter. A template that's wrong for its target still produces *something*; write and
+try one before putting it in a ban list other people pull from.
 
 ## Banning a symbol from the editor
 
@@ -199,8 +237,9 @@ A single combined dialog (all four fields at once) is possible via the SDK's Rem
   genuinely different receiver (e.g. wrapping the object, or calling a factory), no fix is offered.
 - Extension-method calls (`recv.Ext(args)`) are not rewritten, even when a compatible replacement
   extension method exists — the diagnostic still fires, but you make the edit by hand.
-- Argument compatibility beyond a plain count check is opt-in via `argumentMap`, and it only reorders
-  or drops arguments — it can't synthesize a new argument value that wasn't in the original call.
+- Argument compatibility beyond a plain count check is opt-in via `argumentMap` (reorder/drop) or
+  `<Param template="...">` (reshape); only the templated form checks that its output parses, never that
+  it type-checks against the replacement's actual parameter type.
 - No GUI prompt for the replacement value when banning via the portable Ctrl+. refactoring — a NuGet-delivered refactoring can't reach host UI in any IDE. Install the optional [Visual Studio extension](#visual-studio-extension-optional-prompt-for-the-replacement) for a prompt; it trades exact symbol resolution for the dialog.
 
 ## Building

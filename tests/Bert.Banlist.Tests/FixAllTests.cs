@@ -12,8 +12,8 @@ namespace Bert.Banlist.Tests
     {
         private const string MixedBanXml = """
             <BannedSymbols>
-              <Ban kind="Type" symbol="Legacy.Stuff.OldHelper" replacement="New.Stuff.NewHelper" />
-              <Ban kind="Method" symbol="Legacy.Stuff.OldLogger.Log(System.String)" replacement="New.Stuff.NewLogger.Log" />
+              <Ban symbol="Legacy.Stuff.OldHelper" replacement="New.Stuff.NewHelper" />
+              <Ban symbol="Legacy.Stuff.OldLogger.Log(System.String)" replacement="New.Stuff.NewLogger.Log" />
             </BannedSymbols>
             """;
 
@@ -115,7 +115,7 @@ namespace Bert.Banlist.Tests
         {
             const string BanXml = """
                 <BannedSymbols>
-                  <Ban kind="Type" symbol="Legacy.Stuff.OldHelper" replacement="New.Stuff.NewHelper" />
+                  <Ban symbol="Legacy.Stuff.OldHelper" replacement="New.Stuff.NewHelper" />
                 </BannedSymbols>
                 """;
             var test = new BanCodeFixTest

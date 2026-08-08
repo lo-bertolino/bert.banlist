@@ -18,16 +18,16 @@ namespace Bert.Banlist.VisualStudio.Tests
             var existing =
                 "<BannedSymbols>\r\n" +
                 "  <!-- keep me -->\r\n" +
-                "  <Ban kind=\"Type\" symbol=\"A.B\" replacement=\"A.C\" />\r\n" +
+                "  <Ban symbol=\"A.B\" replacement=\"A.C\" />\r\n" +
                 "</BannedSymbols>\r\n";
 
-            var result = BanXmlWriter.Append(existing, BanKind.Method, "System.Console.WriteLine", "My.Log.Info", "structured logging");
+            var result = BanXmlWriter.Append(existing, "System.Console.WriteLine", "My.Log.Info", "structured logging");
 
             Assert.Equal(
                 "<BannedSymbols>\r\n" +
                 "  <!-- keep me -->\r\n" +
-                "  <Ban kind=\"Type\" symbol=\"A.B\" replacement=\"A.C\" />\r\n" +
-                "  <Ban kind=\"Method\" symbol=\"System.Console.WriteLine\" replacement=\"My.Log.Info\" reason=\"structured logging\" />\r\n" +
+                "  <Ban symbol=\"A.B\" replacement=\"A.C\" />\r\n" +
+                "  <Ban symbol=\"System.Console.WriteLine\" replacement=\"My.Log.Info\" reason=\"structured logging\" />\r\n" +
                 "</BannedSymbols>\r\n",
                 result);
         }
@@ -35,15 +35,15 @@ namespace Bert.Banlist.VisualStudio.Tests
         [Fact]
         public void Append_KeepsLfLineEndingsWhenTheFileUsesThem()
         {
-            var existing = "<BannedSymbols>\n  <Ban kind=\"Type\" symbol=\"A.B\" />\n</BannedSymbols>\n";
+            var existing = "<BannedSymbols>\n  <Ban symbol=\"A.B\" />\n</BannedSymbols>\n";
 
-            var result = BanXmlWriter.Append(existing, BanKind.Type, "A.C", null, null);
+            var result = BanXmlWriter.Append(existing, "A.C", null, null);
 
             Assert.DoesNotContain("\r", result);
             Assert.Equal(
                 "<BannedSymbols>\n" +
-                "  <Ban kind=\"Type\" symbol=\"A.B\" />\n" +
-                "  <Ban kind=\"Type\" symbol=\"A.C\" />\n" +
+                "  <Ban symbol=\"A.B\" />\n" +
+                "  <Ban symbol=\"A.C\" />\n" +
                 "</BannedSymbols>\n",
                 result);
         }
@@ -51,11 +51,11 @@ namespace Bert.Banlist.VisualStudio.Tests
         [Fact]
         public void Append_MatchesTheIndentationOfExistingEntries()
         {
-            var existing = "<BannedSymbols>\r\n    <Ban kind=\"Type\" symbol=\"A.B\" />\r\n</BannedSymbols>\r\n";
+            var existing = "<BannedSymbols>\r\n    <Ban symbol=\"A.B\" />\r\n</BannedSymbols>\r\n";
 
-            var result = BanXmlWriter.Append(existing, BanKind.Type, "A.C", null, null);
+            var result = BanXmlWriter.Append(existing, "A.C", null, null);
 
-            Assert.Contains("\r\n    <Ban kind=\"Type\" symbol=\"A.C\" />\r\n", result);
+            Assert.Contains("\r\n    <Ban symbol=\"A.C\" />\r\n", result);
         }
 
         [Theory]
@@ -64,11 +64,11 @@ namespace Bert.Banlist.VisualStudio.Tests
         [InlineData("   \r\n")]
         public void Append_CreatesAFreshDocumentForEmptyInput(string? existing)
         {
-            var result = BanXmlWriter.Append(existing, BanKind.Type, "A.B", "A.C", null);
+            var result = BanXmlWriter.Append(existing, "A.B", "A.C", null);
 
             Assert.Equal(
                 "<BannedSymbols>\r\n" +
-                "  <Ban kind=\"Type\" symbol=\"A.B\" replacement=\"A.C\" />\r\n" +
+                "  <Ban symbol=\"A.B\" replacement=\"A.C\" />\r\n" +
                 "</BannedSymbols>\r\n",
                 result);
         }
@@ -76,11 +76,11 @@ namespace Bert.Banlist.VisualStudio.Tests
         [Fact]
         public void Append_ExpandsASelfClosingRoot()
         {
-            var result = BanXmlWriter.Append("<BannedSymbols />\r\n", BanKind.Namespace, "System.Data.SqlClient", null, null);
+            var result = BanXmlWriter.Append("<BannedSymbols />\r\n", "System.Data.SqlClient", null, null);
 
             Assert.Equal(
                 "<BannedSymbols>\r\n" +
-                "  <Ban kind=\"Namespace\" symbol=\"System.Data.SqlClient\" />\r\n" +
+                "  <Ban symbol=\"System.Data.SqlClient\" />\r\n" +
                 "</BannedSymbols>\r\n",
                 result);
         }
@@ -91,9 +91,9 @@ namespace Bert.Banlist.VisualStudio.Tests
         [InlineData(null)]
         public void Append_OmitsBlankReplacementAndReason(string? blank)
         {
-            var result = BanXmlWriter.Append(null, BanKind.Property, "System.DateTime.Now", blank, blank);
+            var result = BanXmlWriter.Append(null, "System.DateTime.Now", blank, blank);
 
-            Assert.Contains("<Ban kind=\"Property\" symbol=\"System.DateTime.Now\" />", result);
+            Assert.Contains("<Ban symbol=\"System.DateTime.Now\" />", result);
             Assert.DoesNotContain("replacement", result);
             Assert.DoesNotContain("reason", result);
         }
@@ -101,7 +101,7 @@ namespace Bert.Banlist.VisualStudio.Tests
         [Fact]
         public void Append_EscapesXmlSpecialCharacters()
         {
-            var result = BanXmlWriter.Append(null, BanKind.Type, "N.MyList<T>", null, "use \"the\" other one & move on");
+            var result = BanXmlWriter.Append(null, "N.MyList<T>", null, "use \"the\" other one & move on");
 
             Assert.Contains("symbol=\"N.MyList&lt;T&gt;\"", result);
             Assert.Contains("reason=\"use &quot;the&quot; other one &amp; move on\"", result);
@@ -114,10 +114,9 @@ namespace Bert.Banlist.VisualStudio.Tests
         [Fact]
         public void Append_RoundTripsThroughTheAnalyzersParser()
         {
-            var result = BanXmlWriter.Append(null, BanKind.Method, "System.Net.WebClient.#ctor", "System.Net.Http.HttpClient", "legacy");
+            var result = BanXmlWriter.Append(null, "System.Net.WebClient.#ctor", "System.Net.Http.HttpClient", "legacy");
 
             var entry = BanList.Parse(result).Single();
-            Assert.Equal(BanKind.Method, entry.Kind);
             Assert.Equal("System.Net.WebClient.#ctor", entry.Symbol);
             Assert.Equal("System.Net.Http.HttpClient", entry.Replacement);
             Assert.Equal("legacy", entry.Reason);
@@ -127,31 +126,30 @@ namespace Bert.Banlist.VisualStudio.Tests
         public void Append_ThrowsRatherThanOverwriteMalformedXml()
         {
             Assert.Throws<FormatException>(
-                () => BanXmlWriter.Append("<BannedSymbols><Ban kind=", BanKind.Type, "A.B", null, null));
+                () => BanXmlWriter.Append("<BannedSymbols><Ban kind=", "A.B", null, null));
         }
 
         [Fact]
         public void Append_ThrowsOnAForeignRootElement()
         {
             Assert.Throws<FormatException>(
-                () => BanXmlWriter.Append("<SomethingElse />", BanKind.Type, "A.B", null, null));
+                () => BanXmlWriter.Append("<SomethingElse />", "A.B", null, null));
         }
 
         [Fact]
         public void Append_RejectsAnEmptySymbol()
         {
-            Assert.Throws<ArgumentException>(() => BanXmlWriter.Append(null, BanKind.Type, "  ", null, null));
+            Assert.Throws<ArgumentException>(() => BanXmlWriter.Append(null, "  ", null, null));
         }
 
         [Fact]
-        public void Contains_MatchesOnKindAndSymbolTogether()
+        public void Contains_MatchesOnSymbol()
         {
-            var xml = "<BannedSymbols>\r\n  <Ban kind=\"Type\" symbol=\"A.B\" />\r\n</BannedSymbols>\r\n";
+            var xml = "<BannedSymbols>\r\n  <Ban symbol=\"A.B\" />\r\n</BannedSymbols>\r\n";
 
-            Assert.True(BanXmlWriter.Contains(xml, BanKind.Type, "A.B"));
-            Assert.False(BanXmlWriter.Contains(xml, BanKind.Method, "A.B"));
-            Assert.False(BanXmlWriter.Contains(xml, BanKind.Type, "A.C"));
-            Assert.False(BanXmlWriter.Contains(null, BanKind.Type, "A.B"));
+            Assert.True(BanXmlWriter.Contains(xml, "A.B"));
+            Assert.False(BanXmlWriter.Contains(xml, "A.C"));
+            Assert.False(BanXmlWriter.Contains(null, "A.B"));
         }
     }
 }

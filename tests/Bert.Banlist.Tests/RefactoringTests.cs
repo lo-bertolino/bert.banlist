@@ -26,13 +26,13 @@ namespace Bert.Banlist.Tests
             test.FixedState.Sources.Add(TestSources.Definitions);
             test.TestState.AdditionalFiles.Add(("BannedSymbols.xml", """
                 <BannedSymbols>
-                  <Ban kind="Type" symbol="Legacy.Data.Client" replacement="New.Data.Client" />
+                  <Ban symbol="Legacy.Data.Client" replacement="New.Data.Client" />
                 </BannedSymbols>
                 """));
             test.FixedState.AdditionalFiles.Add(("BannedSymbols.xml", SourceText.From(
                 "<BannedSymbols>\n" +
-                "  <Ban kind=\"Type\" symbol=\"Legacy.Data.Client\" replacement=\"New.Data.Client\" />\n" +
-                "  <Ban kind=\"Type\" symbol=\"Legacy.Stuff.OldHelper\" replacement=\"TODO\" />\n" +
+                "  <Ban symbol=\"Legacy.Data.Client\" replacement=\"New.Data.Client\" />\n" +
+                "  <Ban symbol=\"Legacy.Stuff.OldHelper\" replacement=\"TODO\" />\n" +
                 "</BannedSymbols>\n", Encoding.UTF8)));
             await test.RunAsync();
         }
@@ -57,7 +57,7 @@ namespace Bert.Banlist.Tests
             test.TestState.AdditionalFiles.Add(("BannedSymbols.xml", "<BannedSymbols />"));
             test.FixedState.AdditionalFiles.Add(("BannedSymbols.xml", SourceText.From(
                 "<BannedSymbols>\n" +
-                "  <Ban kind=\"Method\" symbol=\"Legacy.Stuff.OldHelper.DoThing(System.String)\" replacement=\"TODO\" />\n" +
+                "  <Ban symbol=\"Legacy.Stuff.OldHelper.DoThing(System.String)\" replacement=\"TODO\" />\n" +
                 "</BannedSymbols>\n", Encoding.UTF8)));
             await test.RunAsync();
         }
@@ -78,7 +78,7 @@ namespace Bert.Banlist.Tests
                 """;
             var banXml = """
                 <BannedSymbols>
-                  <Ban kind="Type" symbol="Legacy.Stuff.OldHelper" replacement="New.Stuff.NewHelper" />
+                  <Ban symbol="Legacy.Stuff.OldHelper" replacement="New.Stuff.NewHelper" />
                 </BannedSymbols>
                 """;
             var test = new BanRefactoringTest { TestCode = source, FixedCode = source };
@@ -108,7 +108,7 @@ namespace Bert.Banlist.Tests
             test.FixedState.Sources.Add(TestSources.Definitions);
             test.FixedState.AdditionalFiles.Add(("BannedSymbols.xml", SourceText.From(
                 "<BannedSymbols>\n" +
-                "  <Ban kind=\"Type\" symbol=\"Legacy.Stuff.OldHelper\" replacement=\"TODO\" />\n" +
+                "  <Ban symbol=\"Legacy.Stuff.OldHelper\" replacement=\"TODO\" />\n" +
                 "</BannedSymbols>\n", Encoding.UTF8)));
             await test.RunAsync();
         }

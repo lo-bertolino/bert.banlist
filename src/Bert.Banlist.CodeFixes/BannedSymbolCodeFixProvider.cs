@@ -52,6 +52,8 @@ namespace Bert.Banlist
             var argumentMap = ParseArgumentMap(argumentMapText);
 
             var document = context.Document;
+            var richPlan = await TryLoadArgumentPlanAsync(document, bannedSymbol, context.CancellationToken).ConfigureAwait(false);
+
             var root = await document.GetSyntaxRootAsync(context.CancellationToken).ConfigureAwait(false);
             var semanticModel = await document.GetSemanticModelAsync(context.CancellationToken).ConfigureAwait(false);
             if (root == null || semanticModel == null)
@@ -62,9 +64,9 @@ namespace Bert.Banlist
             var node = root.FindNode(context.Span, getInnermostNodeForTie: true);
             var fix = kind switch
             {
-                BanKind.Type => PrepareTypeFix(node, replacement!, semanticModel, context.CancellationToken),
-                BanKind.Namespace => PrepareNamespaceFix(node, bannedSymbol, replacement!, semanticModel, context.CancellationToken),
-                BanKind.Method => PrepareMethodFix(node, replacement!, argumentMap, semanticModel, context.CancellationToken),
+                BanKind.Type => PrepareTypeFix(node, replacement!, richPlan, semanticModel, context.CancellationToken),
+                BanKind.Namespace => PrepareNamespaceFix(node, bannedSymbol, replacement!, richPlan, semanticModel, context.CancellationToken),
+                BanKind.Method => PrepareMethodFix(node, replacement!, argumentMap, richPlan, semanticModel, context.CancellationToken),
                 BanKind.Property or BanKind.Field or BanKind.Event => PrepareMemberFix(node, replacement!, semanticModel, context.CancellationToken),
                 _ => null,
             };
@@ -113,17 +115,17 @@ namespace Bert.Banlist
             public bool ManageImports { get; }
         }
 
-        private static PreparedFix? PrepareTypeFix(SyntaxNode node, string replacement, SemanticModel semanticModel, CancellationToken cancellationToken)
+        private static PreparedFix? PrepareTypeFix(SyntaxNode node, string replacement, BanParam[]? richPlan, SemanticModel semanticModel, CancellationToken cancellationToken)
         {
             if (node is not SimpleNameSyntax typeNode)
             {
                 return null;
             }
 
-            return PrepareTypeReplacement(typeNode, replacement, semanticModel, cancellationToken);
+            return PrepareTypeReplacement(typeNode, replacement, richPlan, semanticModel, cancellationToken);
         }
 
-        private static PreparedFix? PrepareNamespaceFix(SyntaxNode node, string? bannedNamespace, string replacementNamespace, SemanticModel semanticModel, CancellationToken cancellationToken)
+        private static PreparedFix? PrepareNamespaceFix(SyntaxNode node, string? bannedNamespace, string replacementNamespace, BanParam[]? richPlan, SemanticModel semanticModel, CancellationToken cancellationToken)
         {
             // Namespace-ban fixes only handle type references: the classic "same type moved to a new
             // namespace" migration (System.Data.SqlClient -> Microsoft.Data.SqlClient).
@@ -157,10 +159,10 @@ namespace Bert.Banlist
                 return null;
             }
 
-            return PrepareTypeReplacement(typeNode, replacementNamespace + relative + "." + type.Name, semanticModel, cancellationToken);
+            return PrepareTypeReplacement(typeNode, replacementNamespace + relative + "." + type.Name, richPlan, semanticModel, cancellationToken);
         }
 
-        private static PreparedFix? PrepareTypeReplacement(SimpleNameSyntax typeNode, string replacementFullName, SemanticModel semanticModel, CancellationToken cancellationToken)
+        private static PreparedFix? PrepareTypeReplacement(SimpleNameSyntax typeNode, string replacementFullName, BanParam[]? richPlan, SemanticModel semanticModel, CancellationToken cancellationToken)
         {
             var arity = (typeNode as GenericNameSyntax)?.TypeArgumentList.Arguments.Count ?? 0;
             var metadataName = arity > 0 ? replacementFullName + "`" + arity : replacementFullName;
@@ -172,40 +174,58 @@ namespace Bert.Banlist
             }
 
             var target = WidenOverNamespaceQualifiers(typeNode, semanticModel, cancellationToken);
+            var staleNamespace = GetNamespaceName(semanticModel.GetSymbolInfo(typeNode, cancellationToken).Symbol);
+            var typeArguments = (typeNode as GenericNameSyntax)?.TypeArgumentList.ToString() ?? "";
+            var replacementTypeText = "global::" + replacementFullName + typeArguments;
 
             // When the banned type is being constructed, only offer the swap if the replacement has a
-            // constructor compatible with the existing argument list.
+            // constructor compatible with the existing argument list (or the entry's argument plan).
             var creation = target.Parent as ObjectCreationExpressionSyntax;
             if (creation != null && creation.Type == target)
             {
                 var argumentCount = creation.ArgumentList?.Arguments.Count ?? 0;
-                if (!replacementType.InstanceConstructors.Any(c => IsArityCompatible(c, argumentCount)))
+                var effectiveArgCount = richPlan?.Length ?? argumentCount;
+                if (!replacementType.InstanceConstructors.Any(c => IsArityCompatible(c, effectiveArgCount)))
                 {
                     return null;
                 }
+
+                if (richPlan != null)
+                {
+                    if (creation.ArgumentList == null || !IsPlanValidForCall(richPlan, argumentCount))
+                    {
+                        return null;
+                    }
+
+                    var newArgumentList = BuildPlannedArgumentList(creation.ArgumentList, richPlan);
+                    if (newArgumentList == null)
+                    {
+                        return null;
+                    }
+
+                    var newTypeNode = SyntaxFactory.ParseTypeName(replacementTypeText)
+                        .WithTriviaFrom(creation.Type)
+                        .WithAdditionalAnnotations(Simplifier.Annotation, Simplifier.AddImportsAnnotation);
+                    var newCreation = creation.WithType(newTypeNode).WithArgumentList(newArgumentList);
+                    return new PreparedFix(creation, newCreation, staleNamespace, manageImports: true);
+                }
             }
 
-            var typeArguments = (typeNode as GenericNameSyntax)?.TypeArgumentList.ToString() ?? "";
             var asExpression = target.Parent is MemberAccessExpressionSyntax || target is MemberAccessExpressionSyntax;
-            var text = "global::" + replacementFullName + typeArguments;
-            SyntaxNode replacementNode = asExpression ? SyntaxFactory.ParseExpression(text) : SyntaxFactory.ParseTypeName(text);
+            SyntaxNode replacementNode = asExpression ? SyntaxFactory.ParseExpression(replacementTypeText) : SyntaxFactory.ParseTypeName(replacementTypeText);
             replacementNode = replacementNode
                 .WithTriviaFrom(target)
                 .WithAdditionalAnnotations(Simplifier.Annotation, Simplifier.AddImportsAnnotation);
 
-            return new PreparedFix(
-                target,
-                replacementNode,
-                GetNamespaceName(semanticModel.GetSymbolInfo(typeNode, cancellationToken).Symbol),
-                manageImports: true);
+            return new PreparedFix(target, replacementNode, staleNamespace, manageImports: true);
         }
 
-        private static PreparedFix? PrepareMethodFix(SyntaxNode node, string replacement, int[]? argumentMap, SemanticModel semanticModel, CancellationToken cancellationToken)
+        private static PreparedFix? PrepareMethodFix(SyntaxNode node, string replacement, int[]? argumentMap, BanParam[]? richPlan, SemanticModel semanticModel, CancellationToken cancellationToken)
         {
-            // Constructor-specific ban (kind="Method", #ctor): diagnostic sits on the whole `new` expression.
+            // Constructor-specific ban (a "#ctor"-suffixed symbol): diagnostic sits on the whole `new` expression.
             if (node is ObjectCreationExpressionSyntax creation)
             {
-                return PrepareConstructorFix(creation, replacement, argumentMap, semanticModel, cancellationToken);
+                return PrepareConstructorFix(creation, replacement, argumentMap, richPlan, semanticModel, cancellationToken);
             }
 
             if (node is not SimpleNameSyntax nameNode)
@@ -227,12 +247,13 @@ namespace Bert.Banlist
                 return null;
             }
 
-            if (!IsArgumentMapValidForCall(argumentMap, invocation.ArgumentList.Arguments.Count))
+            var actualArgCount = invocation.ArgumentList.Arguments.Count;
+            if (richPlan != null ? !IsPlanValidForCall(richPlan, actualArgCount) : !IsArgumentMapValidForCall(argumentMap, actualArgCount))
             {
                 return null;
             }
 
-            var effectiveArgCount = argumentMap?.Length ?? invocation.ArgumentList.Arguments.Count;
+            var effectiveArgCount = richPlan?.Length ?? argumentMap?.Length ?? actualArgCount;
 
             // Reduced extension-method calls resolve to a symbol whose IsStatic is false even though
             // the declaration is static; check MethodKind first so this doesn't fall into the plain
@@ -258,7 +279,7 @@ namespace Bert.Banlist
                     return null;
                 }
 
-                return BuildInvocationFix(invocation, nameNode, "global::" + replacement, asFullExpression: true, argumentMap, GetNamespaceName(banned), manageImports: true);
+                return BuildInvocationFix(invocation, nameNode, "global::" + replacement, asFullExpression: true, argumentMap, richPlan, GetNamespaceName(banned), manageImports: true);
             }
 
             // Genuine instance method: `recv.OldMethod(args)` -> `recv.NewMethod(args)`.
@@ -291,18 +312,18 @@ namespace Bert.Banlist
             }
 
             var newMethodName = replacement.Substring(replacement.LastIndexOf('.') + 1);
-            return BuildInvocationFix(invocation, nameNode, newMethodName, asFullExpression: false, argumentMap, staleNamespace: null, manageImports: false);
+            return BuildInvocationFix(invocation, nameNode, newMethodName, asFullExpression: false, argumentMap, richPlan, staleNamespace: null, manageImports: false);
         }
 
-        private static PreparedFix? PrepareConstructorFix(ObjectCreationExpressionSyntax creation, string replacement, int[]? argumentMap, SemanticModel semanticModel, CancellationToken cancellationToken)
+        private static PreparedFix? PrepareConstructorFix(ObjectCreationExpressionSyntax creation, string replacement, int[]? argumentMap, BanParam[]? richPlan, SemanticModel semanticModel, CancellationToken cancellationToken)
         {
             var argumentCount = creation.ArgumentList?.Arguments.Count ?? 0;
-            if (!IsArgumentMapValidForCall(argumentMap, argumentCount))
+            if (richPlan != null ? !IsPlanValidForCall(richPlan, argumentCount) : !IsArgumentMapValidForCall(argumentMap, argumentCount))
             {
                 return null;
             }
 
-            var effectiveArgCount = argumentMap?.Length ?? argumentCount;
+            var effectiveArgCount = richPlan?.Length ?? argumentMap?.Length ?? argumentCount;
 
             var newType = semanticModel.Compilation.GetTypeByMetadataName(replacement);
             if (newType == null || !newType.InstanceConstructors.Any(c => IsArityCompatible(c, effectiveArgCount)))
@@ -313,7 +334,7 @@ namespace Bert.Banlist
             var ctorSymbol = semanticModel.GetSymbolInfo(creation, cancellationToken).Symbol;
             var staleNamespace = GetNamespaceName(ctorSymbol?.ContainingType);
 
-            if (argumentMap == null || creation.ArgumentList == null)
+            if ((richPlan == null && argumentMap == null) || creation.ArgumentList == null)
             {
                 var typeReplacement = SyntaxFactory.ParseTypeName("global::" + replacement)
                     .WithTriviaFrom(creation.Type)
@@ -321,7 +342,9 @@ namespace Bert.Banlist
                 return new PreparedFix(creation.Type, typeReplacement, staleNamespace, manageImports: true);
             }
 
-            var newArgumentList = BuildMappedArgumentList(creation.ArgumentList, argumentMap);
+            var newArgumentList = richPlan != null
+                ? BuildPlannedArgumentList(creation.ArgumentList, richPlan)
+                : BuildMappedArgumentList(creation.ArgumentList, argumentMap!);
             if (newArgumentList == null)
             {
                 return null;
@@ -409,10 +432,11 @@ namespace Bert.Banlist
             string newCalleeText,
             bool asFullExpression,
             int[]? argumentMap,
+            BanParam[]? richPlan,
             string? staleNamespace,
             bool manageImports)
         {
-            if (argumentMap == null)
+            if (richPlan == null && argumentMap == null)
             {
                 SyntaxNode target = asFullExpression ? invocation.Expression : nameNode;
                 SyntaxNode replacementNode = asFullExpression
@@ -422,7 +446,9 @@ namespace Bert.Banlist
                 return new PreparedFix(target, replacementNode, staleNamespace, manageImports);
             }
 
-            var newArgumentList = BuildMappedArgumentList(invocation.ArgumentList, argumentMap);
+            var newArgumentList = richPlan != null
+                ? BuildPlannedArgumentList(invocation.ArgumentList, richPlan)
+                : BuildMappedArgumentList(invocation.ArgumentList, argumentMap!);
             if (newArgumentList == null)
             {
                 return null;
@@ -475,6 +501,54 @@ namespace Bert.Banlist
                 : Enumerable.Empty<SyntaxToken>();
 
             return original.WithArguments(SyntaxFactory.SeparatedList(newArgs, separators));
+        }
+
+        /// <summary>
+        /// Builds the new argument list from a rich <c>&lt;Param&gt;</c> plan: each entry copies (and,
+        /// when it has a template, reshapes) the original argument at <see cref="BanParam.Source"/>.
+        /// A template's <c>{0}</c> is replaced with the original argument's expression text; the
+        /// result must parse as a single, complete expression. <see cref="SyntaxFactory.ParseExpression"/>
+        /// consumes the whole substituted string by default, so a template that doesn't fit its
+        /// argument (e.g. "async {0}" applied to a method-group reference instead of a lambda) leaves
+        /// unconsumed or malformed syntax and is caught here via <c>ContainsDiagnostics</c> — same
+        /// "leave the warning standing" rule as everywhere else in this file. Only syntactic validity
+        /// is checked; whether the result actually type-checks against the replacement is the ban
+        /// author's responsibility, same as an <c>argumentMap</c> reorder never checked types either.
+        /// </summary>
+        private static ArgumentListSyntax? BuildPlannedArgumentList(ArgumentListSyntax original, BanParam[] plan)
+        {
+            var args = original.Arguments;
+            if (plan.Any(p => p.Source >= args.Count))
+            {
+                return null;
+            }
+
+            var newArgs = new ArgumentSyntax[plan.Length];
+            for (var i = 0; i < plan.Length; i++)
+            {
+                var originalArgument = args[plan[i].Source];
+                if (plan[i].Template == null)
+                {
+                    newArgs[i] = originalArgument.WithoutTrivia();
+                    continue;
+                }
+
+                var argumentText = originalArgument.Expression.WithoutTrivia().ToString();
+                var substituted = plan[i].Template!.Replace("{0}", argumentText);
+                var parsed = SyntaxFactory.ParseExpression(substituted);
+                if (parsed.ContainsDiagnostics)
+                {
+                    return null;
+                }
+
+                newArgs[i] = SyntaxFactory.Argument(parsed);
+            }
+
+            var plannedSeparators = plan.Length > 1
+                ? Enumerable.Repeat(SyntaxFactory.Token(SyntaxKind.CommaToken).WithTrailingTrivia(SyntaxFactory.Space), plan.Length - 1)
+                : Enumerable.Empty<SyntaxToken>();
+
+            return original.WithArguments(SyntaxFactory.SeparatedList(newArgs, plannedSeparators));
         }
 
         /// <summary>
@@ -550,6 +624,10 @@ namespace Bert.Banlist
         private static bool IsArgumentMapValidForCall(int[]? map, int actualArgumentCount)
             => map == null || map.All(i => i < actualArgumentCount);
 
+        /// <summary>Same range check as <see cref="IsArgumentMapValidForCall"/>, for a rich plan.</summary>
+        private static bool IsPlanValidForCall(BanParam[] plan, int actualArgumentCount)
+            => plan.All(p => p.Source < actualArgumentCount);
+
         /// <summary>
         /// True when a value of <paramref name="receiverType"/> can be used where
         /// <paramref name="targetType"/> is expected without a cast — i.e. identical, a derived class,
@@ -595,6 +673,32 @@ namespace Bert.Banlist
             }
 
             return result;
+        }
+
+        /// <summary>
+        /// Re-reads BannedSymbols.xml to fetch the matched entry's rich argument plan. The
+        /// diagnostic's property bag only carries the simple <c>argumentMap</c> (a short list of
+        /// indices, cheap to serialize as one string); <c>&lt;Param&gt;</c> templates can contain
+        /// arbitrary text, so rather than invent an escaping scheme for the bag, the fix just looks
+        /// the entry back up by its symbol text — the same file access
+        /// <see cref="BanSymbolRefactoringProvider"/> already relies on.
+        /// </summary>
+        private static async Task<BanParam[]?> TryLoadArgumentPlanAsync(Document document, string? bannedSymbolText, CancellationToken cancellationToken)
+        {
+            if (string.IsNullOrEmpty(bannedSymbolText))
+            {
+                return null;
+            }
+
+            var banDocument = document.Project.AdditionalDocuments.FirstOrDefault(d => BanList.IsBanListFile(d.FilePath ?? d.Name));
+            if (banDocument == null)
+            {
+                return null;
+            }
+
+            var text = await banDocument.GetTextAsync(cancellationToken).ConfigureAwait(false);
+            var entry = BanList.Parse(text.ToString()).FirstOrDefault(e => e.Symbol == bannedSymbolText);
+            return entry?.ArgumentPlan;
         }
 
         private static async Task<Document> ApplyAsync(Document document, PreparedFix fix, CancellationToken cancellationToken)

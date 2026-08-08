@@ -46,17 +46,8 @@ namespace Bert.Banlist
             }
 
             symbol = ((symbol as IMethodSymbol)?.ReducedFrom ?? symbol).OriginalDefinition;
-            var kind = symbol switch
-            {
-                INamedTypeSymbol => BanKind.Type,
-                IMethodSymbol => BanKind.Method,
-                IPropertySymbol => BanKind.Property,
-                IFieldSymbol => BanKind.Field,
-                IEventSymbol => BanKind.Event,
-                INamespaceSymbol => BanKind.Namespace,
-                _ => (BanKind?)null,
-            };
-            if (kind == null)
+            var bannable = symbol is INamedTypeSymbol or IMethodSymbol or IPropertySymbol or IFieldSymbol or IEventSymbol or INamespaceSymbol;
+            if (!bannable)
             {
                 return;
             }
@@ -78,7 +69,7 @@ namespace Bert.Banlist
             {
                 var text = await banDocument.GetTextAsync(context.CancellationToken).ConfigureAwait(false);
                 var xml = text.ToString();
-                if (BanList.Parse(xml).Any(e => e.Kind == kind && e.Symbol == symbolText))
+                if (BanList.Parse(xml).Any(e => e.Symbol == symbolText))
                 {
                     return;
                 }
@@ -87,7 +78,7 @@ namespace Bert.Banlist
                 context.RegisterRefactoring(CodeAction.Create(
                     $"Ban '{display}' (add to {BanList.FileName})",
                     _ => System.Threading.Tasks.Task.FromResult(
-                        project.Solution.WithAdditionalDocumentText(documentId, AppendEntry(xml, kind.Value, symbolText))),
+                        project.Solution.WithAdditionalDocumentText(documentId, AppendEntry(xml, symbolText))),
                     equivalenceKey: "BanSymbol:" + docId));
             }
             else
@@ -104,7 +95,7 @@ namespace Bert.Banlist
                         var solution = project.Solution.AddAdditionalDocument(
                             DocumentId.CreateNewId(project.Id),
                             BanList.FileName,
-                            AppendEntry("<BannedSymbols />", kind.Value, symbolText),
+                            AppendEntry("<BannedSymbols />", symbolText),
                             filePath: filePath);
                         return System.Threading.Tasks.Task.FromResult(solution);
                     },
@@ -112,7 +103,7 @@ namespace Bert.Banlist
             }
         }
 
-        private static SourceText AppendEntry(string xml, BanKind kind, string symbol)
+        private static SourceText AppendEntry(string xml, string symbol)
         {
             XDocument document;
             try
@@ -133,7 +124,6 @@ namespace Bert.Banlist
 
             root.Add(new XElement(
                 "Ban",
-                new XAttribute("kind", kind.ToString()),
                 new XAttribute("symbol", symbol),
                 new XAttribute("replacement", "TODO")));
 

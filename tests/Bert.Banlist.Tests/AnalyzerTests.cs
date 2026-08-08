@@ -32,7 +32,7 @@ namespace Bert.Banlist.Tests
                 }
                 """, """
                 <BannedSymbols>
-                  <Ban kind="Type" symbol="Legacy.Stuff.OldHelper" replacement="New.Stuff.NewHelper" reason="Use NewHelper — see ADR-004." />
+                  <Ban symbol="Legacy.Stuff.OldHelper" replacement="New.Stuff.NewHelper" reason="Use NewHelper — see ADR-004." />
                 </BannedSymbols>
                 """);
             test.ExpectedDiagnostics.Add(
@@ -53,7 +53,7 @@ namespace Bert.Banlist.Tests
                 }
                 """, """
                 <BannedSymbols>
-                  <Ban kind="Type" symbol="Legacy.Stuff.OldHelper" reason="Just don't." />
+                  <Ban symbol="Legacy.Stuff.OldHelper" reason="Just don't." />
                 </BannedSymbols>
                 """);
             test.ExpectedDiagnostics.Add(Ban.Plain("Legacy.Stuff.OldHelper", "Just don't.").WithLocation(0));
@@ -72,7 +72,7 @@ namespace Bert.Banlist.Tests
                 }
                 """, """
                 <BannedSymbols>
-                  <Ban kind="Type" symbol="Legacy.Stuff.OldList&lt;T&gt;" replacement="New.Stuff.NewList" />
+                  <Ban symbol="Legacy.Stuff.OldList&lt;T&gt;" replacement="New.Stuff.NewList" />
                 </BannedSymbols>
                 """);
             test.ExpectedDiagnostics.Add(
@@ -96,7 +96,7 @@ namespace Bert.Banlist.Tests
                 }
                 """, """
                 <BannedSymbols>
-                  <Ban kind="Method" symbol="Legacy.Stuff.OldHelper.DoThing(System.String)" replacement="New.Stuff.NewHelper.DoThing" />
+                  <Ban symbol="Legacy.Stuff.OldHelper.DoThing(System.String)" replacement="New.Stuff.NewHelper.DoThing" />
                 </BannedSymbols>
                 """);
             test.ExpectedDiagnostics.Add(
@@ -120,7 +120,7 @@ namespace Bert.Banlist.Tests
                 }
                 """, """
                 <BannedSymbols>
-                  <Ban kind="Method" symbol="Legacy.Stuff.OldHelper.DoThing" replacement="New.Stuff.NewHelper.DoThing" />
+                  <Ban symbol="Legacy.Stuff.OldHelper.DoThing" replacement="New.Stuff.NewHelper.DoThing" />
                 </BannedSymbols>
                 """);
             test.ExpectedDiagnostics.Add(
@@ -142,7 +142,7 @@ namespace Bert.Banlist.Tests
                 }
                 """, """
                 <BannedSymbols>
-                  <Ban kind="Property" symbol="Legacy.Stuff.OldHelper.Value" replacement="New.Stuff.NewHelper.Value" />
+                  <Ban symbol="Legacy.Stuff.OldHelper.Value" replacement="New.Stuff.NewHelper.Value" />
                 </BannedSymbols>
                 """);
             test.ExpectedDiagnostics.Add(
@@ -162,7 +162,7 @@ namespace Bert.Banlist.Tests
                 }
                 """, """
                 <BannedSymbols>
-                  <Ban kind="Field" symbol="Legacy.Stuff.OldHelper.Count" replacement="New.Stuff.NewHelper.Count" />
+                  <Ban symbol="Legacy.Stuff.OldHelper.Count" replacement="New.Stuff.NewHelper.Count" />
                 </BannedSymbols>
                 """);
             test.ExpectedDiagnostics.Add(
@@ -186,7 +186,7 @@ namespace Bert.Banlist.Tests
                 }
                 """, """
                 <BannedSymbols>
-                  <Ban kind="Method" symbol="Legacy.Stuff.OldHelper.#ctor(System.Int32)" replacement="New.Stuff.NewHelper" />
+                  <Ban symbol="Legacy.Stuff.OldHelper.#ctor(System.Int32)" replacement="New.Stuff.NewHelper" />
                 </BannedSymbols>
                 """);
             test.ExpectedDiagnostics.Add(
@@ -209,7 +209,7 @@ namespace Bert.Banlist.Tests
                 }
                 """, """
                 <BannedSymbols>
-                  <Ban kind="Namespace" symbol="Legacy.Stuff" replacement="New.Stuff" reason="Legacy namespace." />
+                  <Ban symbol="Legacy.Stuff" replacement="New.Stuff" reason="Legacy namespace." />
                 </BannedSymbols>
                 """);
             test.ExpectedDiagnostics.Add(
@@ -220,6 +220,8 @@ namespace Bert.Banlist.Tests
         [Fact]
         public async Task UnresolvableEntry_Ignored()
         {
+            // "Does.Not.Exist" resolves as neither a type nor a member, so it falls back to a
+            // namespace-prefix ban that nothing in this file lives under — inert, not an error.
             var test = Create("""
                 using Legacy.Stuff;
 
@@ -232,10 +234,45 @@ namespace Bert.Banlist.Tests
                 }
                 """, """
                 <BannedSymbols>
-                  <Ban kind="Type" symbol="Does.Not.Exist" replacement="Nope" />
-                  <Ban kind="NotAKind" symbol="Legacy.Stuff.OldHelper" />
+                  <Ban symbol="Does.Not.Exist" replacement="Nope" />
                 </BannedSymbols>
                 """);
+            await test.RunAsync();
+        }
+
+        [Fact]
+        public async Task NoKindAttribute_TypeMemberAndNamespaceAllInferredCorrectly()
+        {
+            // The whole point of removing `kind`: one ban list, no attribute, and a type ban, a
+            // member ban, and a namespace ban all still resolve to the right thing. Each targets a
+            // different symbol so there is no overlap between entries to muddy the assertions.
+            var test = Create("""
+                using Legacy.Stuff;
+                using Legacy.Data;
+
+                class C
+                {
+                    {|#0:OldList<int>|} _field;
+
+                    void M()
+                    {
+                        var y = OldHelper.{|#1:Value|};
+                        var z = new {|#2:Client|}();
+                    }
+                }
+                """, """
+                <BannedSymbols>
+                  <Ban symbol="Legacy.Stuff.OldList&lt;T&gt;" replacement="New.Stuff.NewList" />
+                  <Ban symbol="Legacy.Stuff.OldHelper.Value" replacement="New.Stuff.NewHelper.Value" />
+                  <Ban symbol="Legacy.Data" replacement="New.Data" />
+                </BannedSymbols>
+                """);
+            test.ExpectedDiagnostics.Add(
+                Ban.WithReplacement("Legacy.Stuff.OldList<int>", "New.Stuff.NewList").WithLocation(0));
+            test.ExpectedDiagnostics.Add(
+                Ban.WithReplacement("Legacy.Stuff.OldHelper.Value", "New.Stuff.NewHelper.Value").WithLocation(1));
+            test.ExpectedDiagnostics.Add(
+                Ban.WithReplacement("Legacy.Data.Client", "New.Data").WithLocation(2));
             await test.RunAsync();
         }
 
@@ -272,7 +309,7 @@ namespace Bert.Banlist.Tests
                 }
                 """, """
                 <BannedSymbols>
-                  <Ban kind="Type" symbol="Legacy.Stuff.OldHelper" replacement="New.Stuff.NewHelper" />
+                  <Ban symbol="Legacy.Stuff.OldHelper" replacement="New.Stuff.NewHelper" />
                 </BannedSymbols>
                 """);
             await test.RunAsync();
@@ -293,7 +330,7 @@ namespace Bert.Banlist.Tests
                 }
                 """, """
                 <BannedSymbols>
-                  <Ban kind="Type" symbol="Legacy.Stuff.OldHelper" replacement="New.Stuff.NewHelper" />
+                  <Ban symbol="Legacy.Stuff.OldHelper" replacement="New.Stuff.NewHelper" />
                 </BannedSymbols>
                 """);
             // The variable's type name is one diagnostic, the implicit `new()` the other.

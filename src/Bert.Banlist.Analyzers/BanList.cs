@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Immutable;
 using System.IO;
+using System.Linq;
 using System.Xml;
 using System.Xml.Linq;
 
@@ -39,14 +40,8 @@ namespace Bert.Banlist
             var builder = ImmutableArray.CreateBuilder<BanEntry>();
             foreach (var element in root.Elements("Ban"))
             {
-                var kindText = (string?)element.Attribute("kind");
                 var symbol = (string?)element.Attribute("symbol");
-                if (string.IsNullOrWhiteSpace(kindText) || string.IsNullOrWhiteSpace(symbol))
-                {
-                    continue;
-                }
-
-                if (!Enum.TryParse<BanKind>(kindText, ignoreCase: true, out var kind))
+                if (string.IsNullOrWhiteSpace(symbol))
                 {
                     continue;
                 }
@@ -54,7 +49,8 @@ namespace Bert.Banlist
                 var replacement = NullIfEmpty((string?)element.Attribute("replacement"));
                 var reason = NullIfEmpty((string?)element.Attribute("reason"));
                 var argumentMap = ParseArgumentMap((string?)element.Attribute("argumentMap"));
-                builder.Add(new BanEntry(kind, symbol!.Trim(), replacement, reason, argumentMap));
+                var argumentPlan = ParseArgumentPlan(element);
+                builder.Add(new BanEntry(symbol!.Trim(), replacement, reason, argumentMap, argumentPlan));
             }
 
             return builder.ToImmutable();
@@ -92,6 +88,34 @@ namespace Bert.Banlist
             }
 
             return indices;
+        }
+
+        /// <summary>
+        /// Parses ordered <c>&lt;Param source="N" [template="..."] /&gt;</c> children into the new
+        /// argument list a code fix builds for a call site. A missing or invalid <c>source</c> on any
+        /// one of them voids the whole plan for that ban, same leniency as the rest of this parser.
+        /// </summary>
+        private static BanParam[]? ParseArgumentPlan(XElement banElement)
+        {
+            var paramElements = banElement.Elements("Param").ToList();
+            if (paramElements.Count == 0)
+            {
+                return null;
+            }
+
+            var result = new BanParam[paramElements.Count];
+            for (var i = 0; i < paramElements.Count; i++)
+            {
+                var sourceText = (string?)paramElements[i].Attribute("source");
+                if (!int.TryParse(sourceText, out var source) || source < 0)
+                {
+                    return null;
+                }
+
+                result[i] = new BanParam(source, NullIfEmpty((string?)paramElements[i].Attribute("template")));
+            }
+
+            return result;
         }
     }
 }

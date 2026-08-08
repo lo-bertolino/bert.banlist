@@ -17,10 +17,10 @@ namespace Bert.Banlist.VisualStudio
     {
         private const string RootName = "BannedSymbols";
 
-        /// <summary>True when <paramref name="xml"/> already bans this exact kind/symbol pair.</summary>
-        public static bool Contains(string? xml, BanKind kind, string symbol)
+        /// <summary>True when <paramref name="xml"/> already bans this exact symbol.</summary>
+        public static bool Contains(string? xml, string symbol)
             => !string.IsNullOrWhiteSpace(xml)
-               && BanList.Parse(xml!).Any(e => e.Kind == kind && string.Equals(e.Symbol, symbol, StringComparison.Ordinal));
+               && BanList.Parse(xml!).Any(e => string.Equals(e.Symbol, symbol, StringComparison.Ordinal));
 
         /// <summary>
         /// Returns <paramref name="xml"/> with one more <c>&lt;Ban /&gt;</c> entry. Null/blank input
@@ -33,7 +33,6 @@ namespace Bert.Banlist.VisualStudio
         /// </exception>
         public static string Append(
             string? xml,
-            BanKind kind,
             string symbol,
             string? replacement,
             string? reason,
@@ -45,7 +44,7 @@ namespace Bert.Banlist.VisualStudio
             }
 
             var newLine = DetectNewLine(xml, defaultNewLine);
-            var entry = RenderEntry(kind, symbol, replacement, reason);
+            var entry = RenderEntry(symbol, replacement, reason);
 
             if (string.IsNullOrWhiteSpace(xml))
             {
@@ -92,11 +91,10 @@ namespace Bert.Banlist.VisualStudio
             throw new FormatException("Could not find the <" + RootName + "> element to append to.");
         }
 
-        private static string RenderEntry(BanKind kind, string symbol, string? replacement, string? reason)
+        private static string RenderEntry(string symbol, string? replacement, string? reason)
         {
             var builder = new StringBuilder();
-            builder.Append("<Ban kind=\"").Append(kind).Append('"');
-            builder.Append(" symbol=\"").Append(Escape(symbol.Trim())).Append('"');
+            builder.Append("<Ban symbol=\"").Append(Escape(symbol.Trim())).Append('"');
             if (!string.IsNullOrWhiteSpace(replacement))
             {
                 builder.Append(" replacement=\"").Append(Escape(replacement!.Trim())).Append('"');

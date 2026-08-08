@@ -103,18 +103,18 @@ namespace Bert.Banlist
             }
 
             var target = ((symbol as IMethodSymbol)?.ReducedFrom ?? symbol).OriginalDefinition;
-            if (data.Symbols.TryGetValue(target, out var entry))
+            if (data.Symbols.TryGetValue(target, out var match))
             {
-                Report(context, node.GetLocation(), symbol, entry);
+                Report(context, node.GetLocation(), symbol, match.Entry, match.Kind);
                 return;
             }
 
             // Attribute names resolve to the attribute constructor, not the type — map a banned
             // attribute type back onto its name node.
             if (target is IMethodSymbol { MethodKind: MethodKind.Constructor } ctor
-                && data.Symbols.TryGetValue(ctor.ContainingType.OriginalDefinition, out var typeEntry))
+                && data.Symbols.TryGetValue(ctor.ContainingType.OriginalDefinition, out var typeMatch))
             {
-                Report(context, node.GetLocation(), ctor.ContainingType, typeEntry);
+                Report(context, node.GetLocation(), ctor.ContainingType, typeMatch.Entry, typeMatch.Kind);
                 return;
             }
 
@@ -144,7 +144,7 @@ namespace Bert.Banlist
 
             if (TryMatchNamespace(containingNamespace, data, out var entry))
             {
-                Report(context, node.GetLocation(), symbol, entry!);
+                Report(context, node.GetLocation(), symbol, entry!, BanKind.Namespace);
             }
         }
 
@@ -190,11 +190,11 @@ namespace Bert.Banlist
                 return;
             }
 
-            // Constructor-specific bans (kind="Method", member #ctor). Type-level bans on explicit
+            // Constructor-specific bans (a "#ctor"-suffixed symbol). Type-level bans on explicit
             // `new T(...)` are caught by the type name inside the expression via AnalyzeName.
-            if (data.Symbols.TryGetValue(ctor.OriginalDefinition, out var entry))
+            if (data.Symbols.TryGetValue(ctor.OriginalDefinition, out var ctorMatch))
             {
-                Report(context, context.Node.GetLocation(), ctor, entry);
+                Report(context, context.Node.GetLocation(), ctor, ctorMatch.Entry, ctorMatch.Kind);
                 return;
             }
 
@@ -202,9 +202,9 @@ namespace Bert.Banlist
             if (context.Node is ImplicitObjectCreationExpressionSyntax)
             {
                 var type = ctor.ContainingType;
-                if (data.Symbols.TryGetValue(type.OriginalDefinition, out var typeEntry))
+                if (data.Symbols.TryGetValue(type.OriginalDefinition, out var typeMatch))
                 {
-                    Report(context, context.Node.GetLocation(), type, typeEntry);
+                    Report(context, context.Node.GetLocation(), type, typeMatch.Entry, typeMatch.Kind);
                     return;
                 }
 
@@ -212,15 +212,15 @@ namespace Bert.Banlist
                     && type.ContainingNamespace is { IsGlobalNamespace: false } ns
                     && TryMatchNamespace(ns, data, out var nsEntry))
                 {
-                    Report(context, context.Node.GetLocation(), type, nsEntry!);
+                    Report(context, context.Node.GetLocation(), type, nsEntry!, BanKind.Namespace);
                 }
             }
         }
 
-        private static void Report(SyntaxNodeAnalysisContext context, Location location, ISymbol symbol, BanEntry entry)
+        private static void Report(SyntaxNodeAnalysisContext context, Location location, ISymbol symbol, BanEntry entry, BanKind kind)
         {
             var properties = ImmutableDictionary.CreateBuilder<string, string?>();
-            properties.Add(KindProperty, entry.Kind.ToString());
+            properties.Add(KindProperty, kind.ToString());
             properties.Add(BannedSymbolProperty, entry.Symbol);
             if (entry.Replacement != null)
             {
@@ -259,59 +259,93 @@ namespace Bert.Banlist
         /// <summary>Ban entries resolved against one compilation.</summary>
         private sealed class BanData
         {
-            private BanData(Dictionary<ISymbol, BanEntry> symbols, ImmutableArray<(string Namespace, BanEntry Entry)> namespaces)
+            private BanData(Dictionary<ISymbol, (BanEntry Entry, BanKind Kind)> symbols, ImmutableArray<(string Namespace, BanEntry Entry)> namespaces)
             {
                 Symbols = symbols;
                 Namespaces = namespaces;
             }
 
-            /// <summary>Banned symbols keyed by original definition.</summary>
-            public Dictionary<ISymbol, BanEntry> Symbols { get; }
+            /// <summary>Banned symbols keyed by original definition, with the kind inferred for each.</summary>
+            public Dictionary<ISymbol, (BanEntry Entry, BanKind Kind)> Symbols { get; }
 
             /// <summary>Banned namespace names; matched by prefix against containing namespaces.</summary>
             public ImmutableArray<(string Namespace, BanEntry Entry)> Namespaces { get; }
 
+            /// <summary>
+            /// There is no <c>kind</c> attribute to read: each entry's <see cref="BanEntry.Symbol"/>
+            /// text is resolved against the compilation to find out what it actually is. A
+            /// parenthesized signature or a trailing <c>#ctor</c> can only mean a method or
+            /// constructor. Otherwise the whole text is tried as a type first; if that fails, the
+            /// last dotted segment is tried as a member name on the rest as a container type,
+            /// classified by whatever kind that member turns out to be. If neither resolves, the
+            /// entry falls back to a namespace-prefix ban — matched by string later, never verified
+            /// against the compilation, exactly as namespace bans have always worked.
+            /// </summary>
             public static BanData Resolve(Compilation compilation, ImmutableArray<BanEntry> entries)
             {
-                var symbols = new Dictionary<ISymbol, BanEntry>(SymbolEqualityComparer.Default);
+                var symbols = new Dictionary<ISymbol, (BanEntry, BanKind)>(SymbolEqualityComparer.Default);
                 var namespaces = ImmutableArray.CreateBuilder<(string, BanEntry)>();
 
                 foreach (var entry in entries)
                 {
-                    switch (entry.Kind)
+                    var name = entry.Symbol;
+
+                    if (IsMethodShaped(name))
                     {
-                        case BanKind.Namespace:
-                            namespaces.Add((entry.Symbol, entry));
-                            break;
-                        case BanKind.Type:
-                            AddAll(symbols, ResolveDocId("T:" + DocId.NormalizeType(entry.Symbol), compilation), entry);
-                            break;
-                        case BanKind.Method:
-                            AddAll(symbols, ResolveMember(entry.Symbol, "M:", compilation, SymbolKind.Method), entry);
-                            break;
-                        case BanKind.Property:
-                            AddAll(symbols, ResolveMember(entry.Symbol, "P:", compilation, SymbolKind.Property), entry);
-                            break;
-                        case BanKind.Field:
-                            AddAll(symbols, ResolveMember(entry.Symbol, "F:", compilation, SymbolKind.Field), entry);
-                            break;
-                        case BanKind.Event:
-                            AddAll(symbols, ResolveMember(entry.Symbol, "E:", compilation, SymbolKind.Event), entry);
-                            break;
+                        AddAll(symbols, ResolveMember(name, compilation), entry, BanKind.Method);
+                        continue;
                     }
+
+                    var typeSymbols = ResolveDocId("T:" + DocId.NormalizeType(name), compilation);
+                    if (!IsEmpty(typeSymbols, out var typeList))
+                    {
+                        AddAll(symbols, typeList, entry, BanKind.Type);
+                        continue;
+                    }
+
+                    var members = ResolveMember(name, compilation);
+                    if (!IsEmpty(members, out var memberList))
+                    {
+                        foreach (var member in memberList)
+                        {
+                            AddAll(symbols, new[] { member }, entry, ClassifyMember(member));
+                        }
+
+                        continue;
+                    }
+
+                    namespaces.Add((name, entry));
                 }
 
                 return new BanData(symbols, namespaces.ToImmutable());
             }
 
-            private static void AddAll(Dictionary<ISymbol, BanEntry> map, IEnumerable<ISymbol> resolved, BanEntry entry)
+            private static bool IsMethodShaped(string name)
+                => name.IndexOf('(') >= 0 || name.EndsWith(".#ctor", StringComparison.Ordinal);
+
+            private static BanKind ClassifyMember(ISymbol member) => member switch
+            {
+                IMethodSymbol => BanKind.Method,
+                IPropertySymbol => BanKind.Property,
+                IFieldSymbol => BanKind.Field,
+                IEventSymbol => BanKind.Event,
+                _ => BanKind.Type,
+            };
+
+            private static bool IsEmpty(IEnumerable<ISymbol> source, out List<ISymbol> materialized)
+            {
+                materialized = source.ToList();
+                return materialized.Count == 0;
+            }
+
+            private static void AddAll(Dictionary<ISymbol, (BanEntry, BanKind)> map, IEnumerable<ISymbol> resolved, BanEntry entry, BanKind kind)
             {
                 foreach (var symbol in resolved)
                 {
                     // First entry wins on duplicates.
                     if (!map.ContainsKey(symbol.OriginalDefinition))
                     {
-                        map.Add(symbol.OriginalDefinition, entry);
+                        map.Add(symbol.OriginalDefinition, (entry, kind));
                     }
                 }
             }
@@ -320,15 +354,17 @@ namespace Bert.Banlist
                 => DocumentationCommentId.GetSymbolsForDeclarationId(id, compilation);
 
             /// <summary>
-            /// A member with a parenthesized signature resolves to that exact overload; without one,
-            /// every member of the containing type with that name (and matching kind) is banned.
-            /// Entries that do not resolve (assembly not referenced, typo) are silently skipped.
+            /// Resolves a method-shaped or "Container.Member" name into concrete members. A
+            /// parenthesized signature pins one overload (or a constructor's); without one, every
+            /// member with that name on the resolved container is returned regardless of kind — the
+            /// caller classifies each individually. Entries that do not resolve (assembly not
+            /// referenced, typo) are silently skipped.
             /// </summary>
-            private static IEnumerable<ISymbol> ResolveMember(string name, string prefix, Compilation compilation, SymbolKind kind)
+            private static IEnumerable<ISymbol> ResolveMember(string name, Compilation compilation)
             {
                 if (name.IndexOf('(') >= 0)
                 {
-                    return ResolveDocId(prefix + DocId.NormalizeSignature(name), compilation);
+                    return ResolveDocId("M:" + DocId.NormalizeSignature(name), compilation);
                 }
 
                 var lastDot = name.LastIndexOf('.');
@@ -337,12 +373,12 @@ namespace Bert.Banlist
                     return Enumerable.Empty<ISymbol>();
                 }
 
-                var typeName = name.Substring(0, lastDot);
+                var containerName = name.Substring(0, lastDot);
                 var memberName = name.Substring(lastDot + 1);
                 var members = new List<ISymbol>();
-                foreach (var typeSymbol in ResolveDocId("T:" + DocId.NormalizeType(typeName), compilation))
+                foreach (var containerSymbol in ResolveDocId("T:" + DocId.NormalizeType(containerName), compilation))
                 {
-                    if (typeSymbol is not INamedTypeSymbol type)
+                    if (containerSymbol is not INamedTypeSymbol type)
                     {
                         continue;
                     }
@@ -353,7 +389,7 @@ namespace Bert.Banlist
                     }
                     else
                     {
-                        members.AddRange(type.GetMembers(memberName).Where(m => m.Kind == kind));
+                        members.AddRange(type.GetMembers(memberName));
                     }
                 }
 

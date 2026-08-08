@@ -100,7 +100,7 @@ namespace Bert.Banlist.VisualStudio
 
             var banFilePath = Path.Combine(projectDirectory, BanList.FileName);
             var existingXml = File.Exists(banFilePath) ? File.ReadAllText(banFilePath) : null;
-            if (BanXmlWriter.Contains(existingXml, kind, symbol))
+            if (BanXmlWriter.Contains(existingXml, symbol))
             {
                 await shell.ShowPromptAsync(
                     $"'{symbol}' is already banned in {banFilePath}.",
@@ -130,7 +130,7 @@ namespace Bert.Banlist.VisualStudio
             string updatedXml;
             try
             {
-                updatedXml = BanXmlWriter.Append(existingXml, kind, symbol, replacement, reason);
+                updatedXml = BanXmlWriter.Append(existingXml, symbol, replacement, reason);
             }
             catch (FormatException e)
             {

@@ -1,12 +1,13 @@
 <BannedSymbols>
-  <!-- Style rule: commands must be async. -->
-  <Ban kind="Type"
-       symbol="Sample.App.Commands.RelayCommand"
+  <!-- Style rule: commands must be async. Reshapes the constructor argument too — the Action
+       lambda becomes an async lambda satisfying AsyncRelayCommand's Func<Task> parameter. -->
+  <Ban symbol="Sample.App.Commands.RelayCommand"
        replacement="Sample.App.Commands.AsyncRelayCommand"
-       reason="Commands must be async — see style guide §4." />
+       reason="Commands must be async — see style guide §4.">
+    <Param source="0" template="async {0}" />
+  </Ban>
 
   <!-- Plain ban without replacement: diagnostic only. -->
-  <Ban kind="Property"
-       symbol="System.DateTime.Now"
+  <Ban symbol="System.DateTime.Now"
        reason="Use TimeProvider — DateTime.Now is untestable." />
 </BannedSymbols>

@@ -12,7 +12,7 @@ namespace Bert.Banlist.Tests
     {
         private const string BanXml = """
             <BannedSymbols>
-              <Ban kind="Namespace" symbol="Legacy.Stuff" replacement="New.Stuff" />
+              <Ban symbol="Legacy.Stuff" replacement="New.Stuff" />
             </BannedSymbols>
             """;
 

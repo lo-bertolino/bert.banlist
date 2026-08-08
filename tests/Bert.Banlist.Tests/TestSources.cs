@@ -38,6 +38,16 @@ namespace Bert.Banlist.Tests
                 {
                     public void OldInstanceMethod2(string s) { }
                 }
+
+                public class RelayCommand
+                {
+                    public RelayCommand(System.Action execute) { }
+                }
+
+                public class OldTimer
+                {
+                    public OldTimer(int milliseconds) { }
+                }
             }
 
             namespace Legacy.Data
@@ -81,6 +91,16 @@ namespace Bert.Banlist.Tests
                 public class InstanceWidgetBase
                 {
                     public void NewInstanceMethod2(string s) { }
+                }
+
+                public class AsyncRelayCommand
+                {
+                    public AsyncRelayCommand(System.Func<System.Threading.Tasks.Task> execute) { }
+                }
+
+                public class NewTimer
+                {
+                    public NewTimer(System.TimeSpan delay) { }
                 }
             }
 
